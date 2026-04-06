@@ -252,6 +252,7 @@ td:last-child { border-right: none; }
         <th>TARGET $</th>
         <th>R:R</th>
         <th>UNITS</th>
+        <th>SHARES</th>
         <th>LIVE $</th>
         <th>UNRLZD P&amp;L</th>
         <th class="hm">EXIT DT</th>
@@ -422,13 +423,6 @@ function startQuotePolling() {
   }, 30000);
 }
 
-function calcUnrealized(t) {
-  var price = livePrices[t.ticker];
-  if (!price || t.exitPrice) return null;
-  var shares = Math.floor((t.units * 100) / t.entryPrice);
-  return (price - t.entryPrice) * shares;
-}
-
 function fmtLivePrice(t) {
   if (t.exitPrice) return '<span class="td-m">--</span>';
   var price = livePrices[t.ticker];
@@ -456,11 +450,12 @@ function addTrade() {
   if (!ticker || !entryDate || isNaN(entryPrice)) { showToast('ERROR: TICKER, DATE, PRICE REQUIRED'); return; }
   var openCount = trades.filter(function(t) { return !t.exitPrice; }).length;
   if (openCount >= 3) { showToast('MAX 3 OPEN POSITIONS - STRATEGY RULE'); return; }
-  trades.unshift({ id: uid(), ticker: ticker, entryDate: entryDate, entryPrice: entryPrice, units: units, stop: stop, target: target, notes: notes, exitDate: null, exitPrice: null });
+  var shares = parseFloat(((units * 100) / entryPrice).toFixed(6));
+  trades.unshift({ id: uid(), ticker: ticker, entryDate: entryDate, entryPrice: entryPrice, units: units, shares: shares, stop: stop, target: target, notes: notes, exitDate: null, exitPrice: null });
   saveTrades();
   render();
   clearForm();
-  showToast(ticker + ' LOGGED');
+  showToast(ticker + ' LOGGED — ' + shares + ' SHARES');
   refreshAllQuotes();
 }
 
@@ -504,8 +499,15 @@ function deleteTrade(id) {
 
 function calcPnl(t) {
   if (!t.exitPrice) return null;
-  var shares = Math.floor((t.units * 100) / t.entryPrice);
-  return (t.exitPrice - t.entryPrice) * shares;
+  var shares = t.shares || parseFloat(((t.units * 100) / t.entryPrice).toFixed(6));
+  return parseFloat(((t.exitPrice - t.entryPrice) * shares).toFixed(2));
+}
+
+function calcUnrealized(t) {
+  var price = livePrices[t.ticker];
+  if (!price || t.exitPrice) return null;
+  var shares = t.shares || parseFloat(((t.units * 100) / t.entryPrice).toFixed(6));
+  return parseFloat(((price - t.entryPrice) * shares).toFixed(2));
 }
 
 function calcRR(t) {
@@ -542,44 +544,72 @@ function renderChart() {
   }
   canvas.style.display = 'block';
   empty.style.display = 'none';
-  var labels = ['START'];
-  var values = [START_CAPITAL];
-  var ptColors = ['#ff6600'];
+
+  var labels = [];
+  var values = [];
+  var ptColors = [];
   var running = START_CAPITAL;
+
+  labels.push('START');
+  values.push(START_CAPITAL);
+  ptColors.push('#ff6600');
+
   closed.forEach(function(t) {
     running += calcPnl(t);
-    labels.push(t.exitDate + ' ' + t.ticker);
+    labels.push(t.exitDate);
     values.push(parseFloat(running.toFixed(2)));
     ptColors.push(calcPnl(t) >= 0 ? '#00ff41' : '#ff2222');
   });
+
   var lastVal = values[values.length - 1];
   var isUp = lastVal >= START_CAPITAL;
   var lineColor = isUp ? '#00ff41' : '#ff2222';
   var fillColor = isUp ? 'rgba(0,255,65,0.07)' : 'rgba(255,34,34,0.07)';
   var diff = lastVal - START_CAPITAL;
+
   document.getElementById('chartMeta').textContent =
     'CURRENT: $' + lastVal.toFixed(2) +
     '  |  P&L: ' + (diff >= 0 ? '+' : '') + '$' + diff.toFixed(2) +
     '  |  ' + ((diff / START_CAPITAL) * 100).toFixed(1) + '%' +
     '  |  ' + closed.length + ' CLOSED TRADES';
+
   if (equityChartInstance) { equityChartInstance.destroy(); equityChartInstance = null; }
   var ctx = canvas.getContext('2d');
+
+  var allVals = values.slice();
+  var minVal = Math.min.apply(null, allVals.concat([START_CAPITAL]));
+  var maxVal = Math.max.apply(null, allVals.concat([START_CAPITAL]));
+  var padding = Math.max((maxVal - minVal) * 0.15, 20);
+
   equityChartInstance = new Chart(ctx, {
     type: 'line',
     data: {
       labels: labels,
-      datasets: [{
-        data: values,
-        borderColor: lineColor,
-        borderWidth: 1.5,
-        backgroundColor: fillColor,
-        fill: true,
-        tension: 0.3,
-        pointBackgroundColor: ptColors,
-        pointBorderColor: ptColors,
-        pointRadius: 4,
-        pointHoverRadius: 6
-      }]
+      datasets: [
+        {
+          label: 'Fund Value',
+          data: values,
+          borderColor: lineColor,
+          borderWidth: 2,
+          backgroundColor: fillColor,
+          fill: true,
+          tension: 0.3,
+          pointBackgroundColor: ptColors,
+          pointBorderColor: ptColors,
+          pointRadius: 5,
+          pointHoverRadius: 7
+        },
+        {
+          label: 'Baseline $1,000',
+          data: labels.map(function() { return START_CAPITAL; }),
+          borderColor: 'rgba(255,102,0,0.3)',
+          borderWidth: 1,
+          borderDash: [4, 4],
+          pointRadius: 0,
+          fill: false,
+          tension: 0
+        }
+      ]
     },
     options: {
       responsive: true,
@@ -595,9 +625,16 @@ function renderChart() {
           bodyColor: '#cccccc',
           titleFont: { family: 'Share Tech Mono, Courier New, monospace', size: 10 },
           bodyFont: { family: 'Share Tech Mono, Courier New, monospace', size: 11 },
+          filter: function(item) { return item.datasetIndex === 0; },
           callbacks: {
-            title: function(items) { return items[0].label; },
-            label: function(item) { return ' FUND: $' + item.parsed.y.toFixed(2); }
+            title: function(items) {
+              var idx = items[0].dataIndex;
+              return idx === 0 ? 'START' : closed[idx - 1].ticker + ' — ' + labels[idx];
+            },
+            label: function(item) {
+              var diff2 = item.parsed.y - START_CAPITAL;
+              return ' $' + item.parsed.y.toFixed(2) + '  (' + (diff2 >= 0 ? '+' : '') + '$' + diff2.toFixed(2) + ')';
+            }
           }
         }
       },
@@ -609,11 +646,12 @@ function renderChart() {
             color: '#888888',
             font: { family: 'Share Tech Mono, Courier New, monospace', size: 9 },
             maxRotation: 0,
-            maxTicksLimit: 8,
-            callback: function(val, i) { return i === 0 ? 'START' : (closed[i - 1] ? closed[i - 1].ticker : ''); }
+            maxTicksLimit: 10
           }
         },
         y: {
+          min: Math.floor(minVal - padding),
+          max: Math.ceil(maxVal + padding),
           grid: { color: '#1a2a1a', lineWidth: 0.5 },
           border: { color: '#2a4a2a' },
           ticks: {
@@ -701,6 +739,7 @@ function render() {
       '<td class="td-m">' + (t.target ? '$' + t.target.toFixed(2) : '--') + '</td>' +
       '<td class="td-y">' + calcRR(t) + '</td>' +
       '<td class="td-m">' + t.units + '</td>' +
+      '<td class="td-y">' + parseFloat((t.shares || (t.units * 100) / t.entryPrice).toFixed(4)) + '</td>' +
       '<td>' + fmtLivePrice(t) + '</td>' +
       '<td>' + fmtUnrealized(t) + '</td>' +
       '<td class="td-m hm">' + (t.exitDate || '--') + '</td>' +
