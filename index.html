@@ -55,8 +55,8 @@ body { background: var(--bg); color: var(--white); font-family: var(--mono); fon
 @keyframes liveblink { 0%,100%{opacity:1} 50%{opacity:0.2} }
 .blinking { animation: liveblink 1s ease-in-out infinite; }
 
-.stats { display: grid; grid-template-columns: repeat(8,1fr); border-bottom: 1px solid var(--border2); }
-@media(max-width:700px){ .stats { grid-template-columns: repeat(4,1fr); } }
+.stats { display: grid; grid-template-columns: repeat(9,1fr); border-bottom: 1px solid var(--border2); }
+@media(max-width:700px){ .stats { grid-template-columns: repeat(3,1fr); } }
 .sc { padding: 5px 10px; border-right: 1px solid var(--border); }
 .sc:last-child { border-right: none; }
 .sl { color: var(--muted); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 2px; }
@@ -147,6 +147,28 @@ td:last-child { border-right: none; }
 .statusbar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--orange); color: #000; display: flex; justify-content: space-between; align-items: center; padding: 2px 10px; font-size: 9px; font-weight: 700; letter-spacing: 0.1em; z-index: 500; }
 .sb-l { display: flex; gap: 16px; }
 
+.heatmap-wrap { padding: 10px; border-bottom: 1px solid var(--border2); background: var(--surface); }
+.heatmap-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+@media(max-width:700px){ .heatmap-grid { grid-template-columns: repeat(2,1fr); } }
+.hm-group-label { grid-column: 1 / -1; color: var(--muted); font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase; padding: 4px 0 2px; border-bottom: 1px solid var(--border); margin-bottom: 2px; }
+.hm-cell { padding: 7px 10px; border: 1px solid var(--border); cursor: default; transition: border-color 0.15s; position: relative; }
+.hm-cell:hover { border-color: var(--orange); }
+.hm-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 3px; }
+.hm-ticker { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--cyan); }
+.hm-name { font-size: 9px; color: var(--muted); letter-spacing: 0.05em; }
+.hm-price { font-size: 11px; color: var(--white); margin-bottom: 1px; }
+.hm-pct { font-size: 14px; font-weight: 700; }
+.hm-pct.pos { color: var(--greenbright); }
+.hm-pct.neg { color: var(--red); }
+.hm-pct.neu { color: var(--muted); }
+.hm-bar { height: 2px; margin-top: 5px; border-radius: 1px; transition: width 0.4s; }
+.hm-bar.pos { background: var(--greenbright); }
+.hm-bar.neg { background: var(--red); }
+.hm-bar.neu { background: var(--muted); }
+.hm-cell.strong-pos { background: rgba(0,255,65,0.06); border-color: rgba(0,255,65,0.2); }
+.hm-cell.strong-neg { background: rgba(255,34,34,0.06); border-color: rgba(255,34,34,0.2); }
+.hm-loading { color: var(--muted); font-size: 10px; letter-spacing: 0.1em; padding: 20px; text-align: center; }
+
 @media(max-width:600px){ .hm { display: none; } }
 </style>
 </head>
@@ -196,12 +218,24 @@ td:last-child { border-right: none; }
 <div class="stats">
   <div class="sc"><div class="sl">Starting Capital</div><div class="sv ora">$1,000.00</div></div>
   <div class="sc"><div class="sl">Realized P&amp;L</div><div class="sv wht" id="statPnl">$0.00</div></div>
+  <div class="sc"><div class="sl">Fund Return %</div><div class="sv wht" id="statYTD">--</div></div>
   <div class="sc"><div class="sl">Unrealized P&amp;L</div><div class="sv wht" id="statUnrealized">--</div></div>
   <div class="sc"><div class="sl">Win Rate</div><div class="sv wht" id="statWR">--</div></div>
   <div class="sc"><div class="sl">Open Positions</div><div class="sv ora" id="statOpen">0</div></div>
   <div class="sc"><div class="sl">Units Deployed</div><div class="sv wht" id="statUnits">0 / 3</div></div>
   <div class="sc"><div class="sl">Total Trades</div><div class="sv yel" id="statTotal">0</div></div>
   <div class="sc"><div class="sl">Market</div><div class="sv wht" id="statMkt">--</div></div>
+</div>
+
+<div class="sh">
+  <span class="sh-title">SECTOR HEAT MAP</span>
+  <div class="sh-line"></div>
+  <span class="sh-tag" id="hmMeta">5-DAY % CHANGE &nbsp;&middot;&nbsp; LOADING...</span>
+</div>
+<div class="heatmap-wrap">
+  <div class="heatmap-grid" id="heatmapGrid">
+    <div class="hm-loading">FETCHING SECTOR DATA...</div>
+  </div>
 </div>
 
 <div class="sh">
@@ -258,6 +292,7 @@ td:last-child { border-right: none; }
         <th class="hm">EXIT DT</th>
         <th>EXIT $</th>
         <th>RLZD P&amp;L</th>
+        <th>% G/L</th>
         <th>STATUS</th>
         <th class="hm">NOTES</th>
         <th>ACT</th>
@@ -524,6 +559,37 @@ function fmtPnl(n) {
   return '<span class="' + cls + '">' + (n >= 0 ? '+' : '-') + '$' + Math.abs(n).toFixed(2) + '</span>';
 }
 
+function calcPct(t) {
+  if (!t.exitPrice) return null;
+  return ((t.exitPrice - t.entryPrice) / t.entryPrice) * 100;
+}
+
+function fmtPct(t) {
+  if (t.exitPrice) {
+    var pct = calcPct(t);
+    var cls = pct >= 0 ? 'ppos' : 'pneg';
+    return '<span class="' + cls + '">' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%</span>';
+  }
+  var lp = livePrices[t.ticker];
+  if (!lp) return '<span class="pneu">--</span>';
+  var upct = ((lp - t.entryPrice) / t.entryPrice) * 100;
+  var ucls = upct >= 0 ? 'upos' : 'uneg';
+  return '<span class="' + ucls + '">' + (upct >= 0 ? '+' : '') + upct.toFixed(2) + '%</span>';
+}
+
+function fmtPct(t) {
+  var pct;
+  if (t.exitPrice) {
+    pct = ((t.exitPrice - t.entryPrice) / t.entryPrice) * 100;
+  } else {
+    var livePrice = livePrices[t.ticker];
+    if (!livePrice) return '<span class="pneu">--</span>';
+    pct = ((livePrice - t.entryPrice) / t.entryPrice) * 100;
+  }
+  var cls = pct >= 0 ? 'ppos' : 'pneg';
+  return '<span class="' + cls + '">' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%</span>';
+}
+
 function setFilter(f, btn) {
   currentFilter = f;
   document.querySelectorAll('.fb').forEach(function(b) { b.classList.remove('active'); });
@@ -678,6 +744,17 @@ function render() {
   pEl.textContent = (realizedPnl >= 0 ? '+' : '-') + '$' + Math.abs(realizedPnl).toFixed(2);
   pEl.className = 'sv ' + (realizedPnl > 0 ? 'pos' : realizedPnl < 0 ? 'neg' : 'wht');
 
+  var ytdEl = document.getElementById('statYTD');
+  var totalPnl = realizedPnl + totalUnrealized;
+  var ytdPct = (totalPnl / START_CAPITAL) * 100;
+  if (trades.length === 0) {
+    ytdEl.textContent = '--';
+    ytdEl.className = 'sv wht';
+  } else {
+    ytdEl.textContent = (ytdPct >= 0 ? '+' : '') + ytdPct.toFixed(2) + '%';
+    ytdEl.className = 'sv ' + (ytdPct >= 0 ? 'pos' : 'neg');
+  }
+
   document.getElementById('statTotal').textContent = trades.length;
 
   var wrEl = document.getElementById('statWR');
@@ -745,6 +822,7 @@ function render() {
       '<td class="td-m hm">' + (t.exitDate || '--') + '</td>' +
       '<td class="td-p">' + (t.exitPrice ? '$' + t.exitPrice.toFixed(2) : '--') + '</td>' +
       '<td>' + fmtPnl(pnl) + '</td>' +
+      '<td>' + fmtPct(t) + '</td>' +
       '<td><span class="badge ' + scls + '">' + slbl + '</span></td>' +
       '<td class="td-notes hm" title="' + t.notes + '">' + (t.notes || '--') + '</td>' +
       '<td>' + closeBtn + '<button class="ab" onclick="deleteTrade(\'' + t.id + '\')">DEL</button></td>' +
@@ -769,12 +847,127 @@ function showToast(msg) {
   setTimeout(function() { t.classList.remove('show'); }, 2500);
 }
 
+var SECTORS = [
+  { group: 'BROAD MARKET' },
+  { ticker: 'SPY',  name: 'S&P 500' },
+  { ticker: 'QQQ',  name: 'Nasdaq 100' },
+  { ticker: 'IWM',  name: 'Russell 2000' },
+  { ticker: 'VIX',  name: 'Volatility', special: true },
+  { group: 'MOMENTUM SECTORS' },
+  { ticker: 'XLK',  name: 'Technology' },
+  { ticker: 'XLV',  name: 'Health Care' },
+  { ticker: 'XLY',  name: 'Cons. Discret.' },
+  { ticker: 'XLI',  name: 'Industrials' },
+  { group: 'SAFE HAVEN' },
+  { ticker: 'GLD',  name: 'Gold' },
+  { ticker: 'GDX',  name: 'Gold Miners' },
+  { ticker: 'XLU',  name: 'Utilities' },
+  { ticker: 'XLP',  name: 'Cons. Staples' },
+  { group: 'MACRO SENSITIVE' },
+  { ticker: 'XLE',  name: 'Energy' },
+  { ticker: 'XLF',  name: 'Financials' },
+  { ticker: 'TLT',  name: 'Long Bonds' },
+  { ticker: 'XLB',  name: 'Materials' }
+];
+
+var heatmapData = {};
+
+function getFiveDayAgoTimestamp() {
+  var now = new Date();
+  var daysBack = 0;
+  var d = new Date(now);
+  while (daysBack < 7) {
+    d.setDate(d.getDate() - 1);
+    var day = d.getDay();
+    if (day !== 0 && day !== 6) daysBack++;
+    if (daysBack === 5) break;
+  }
+  d.setHours(0, 0, 0, 0);
+  return Math.floor(d.getTime() / 1000);
+}
+
+function fetchSectorCandle(ticker, cb) {
+  var fromTs = getFiveDayAgoTimestamp();
+  var toTs = Math.floor(Date.now() / 1000);
+  var url = 'https://finnhub.io/api/v1/stock/candle?symbol=' + ticker +
+    '&resolution=D&from=' + fromTs + '&to=' + toTs + '&token=' + FINNHUB_KEY;
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data && data.s === 'ok' && data.o && data.o.length > 0 && data.c && data.c.length > 0) {
+        var openPrice = data.o[0];
+        var currentPrice = data.c[data.c.length - 1];
+        var pct = ((currentPrice - openPrice) / openPrice) * 100;
+        cb({ price: currentPrice, pct: parseFloat(pct.toFixed(2)), open5: openPrice });
+      } else {
+        cb(null);
+      }
+    })
+    .catch(function() { cb(null); });
+}
+
+function renderHeatmap() {
+  var grid = document.getElementById('heatmapGrid');
+  if (!grid) return;
+  var tickers = SECTORS.filter(function(s) { return s.ticker; });
+  var loaded = tickers.filter(function(s) { return heatmapData[s.ticker] !== undefined; }).length;
+  var html = '';
+  var currentGroup = '';
+  SECTORS.forEach(function(s) {
+    if (s.group) {
+      html += '<div class="hm-group-label">' + s.group + '</div>';
+      return;
+    }
+    var d = heatmapData[s.ticker];
+    var pctClass = 'neu';
+    var cellClass = '';
+    var pctStr = '...';
+    var priceStr = '...';
+    var barWidth = 0;
+    var barClass = 'neu';
+    if (d) {
+      pctStr = (d.pct >= 0 ? '+' : '') + d.pct.toFixed(2) + '%';
+      priceStr = '$' + d.price.toFixed(2);
+      if (d.pct > 0) { pctClass = 'pos'; barClass = 'pos'; }
+      else if (d.pct < 0) { pctClass = 'neg'; barClass = 'neg'; }
+      barWidth = Math.min(Math.abs(d.pct) * 15, 100);
+      if (d.pct >= 2) cellClass = 'strong-pos';
+      else if (d.pct <= -2) cellClass = 'strong-neg';
+    }
+    html += '<div class="hm-cell ' + cellClass + '">' +
+      '<div class="hm-top">' +
+        '<span class="hm-ticker">' + s.ticker + '</span>' +
+        '<span class="hm-name">' + s.name + '</span>' +
+      '</div>' +
+      '<div class="hm-price">' + priceStr + '</div>' +
+      '<div class="hm-pct ' + pctClass + '">' + pctStr + '</div>' +
+      '<div class="hm-bar ' + barClass + '" style="width:' + barWidth + '%"></div>' +
+      '</div>';
+  });
+  grid.innerHTML = html;
+  var now = new Date();
+  var ts = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', timeZone: 'America/Chicago' });
+  document.getElementById('hmMeta').textContent = '5-DAY % CHANGE  |  ' + loaded + '/' + tickers.length + ' LOADED  |  ' + ts + ' CT';
+}
+
+function loadHeatmap() {
+  var tickers = SECTORS.filter(function(s) { return s.ticker; });
+  tickers.forEach(function(s) {
+    fetchSectorCandle(s.ticker, function(data) {
+      heatmapData[s.ticker] = data;
+      renderHeatmap();
+    });
+  });
+}
+
 document.getElementById('f_entry_date').value = new Date().toISOString().split('T')[0];
 document.getElementById('closeModal').addEventListener('click', function(e) {
   if (e.target === e.currentTarget) closeModal();
 });
 
 loadTrades();
+loadHeatmap();
+setInterval(loadHeatmap, 300000);
 </script>
 </body>
 </html>
