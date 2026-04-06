@@ -151,24 +151,19 @@ td:last-child { border-right: none; }
 .heatmap-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 @media(max-width:700px){ .heatmap-grid { grid-template-columns: repeat(2,1fr); } }
 .hm-group-label { grid-column: 1 / -1; color: var(--muted); font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase; padding: 4px 0 2px; border-bottom: 1px solid var(--border); margin-bottom: 2px; }
-.hm-cell { padding: 7px 10px; border: 1px solid var(--border); cursor: default; transition: border-color 0.15s; position: relative; }
+.hm-cell { padding: 10px 10px 8px; border: 1px solid var(--border); cursor: default; position: relative; min-height: 90px; display: flex; flex-direction: column; justify-content: space-between; transition: border-color 0.2s, background 0.3s; }
 .hm-cell:hover { border-color: var(--orange); }
-.hm-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 3px; }
-.hm-ticker { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--cyan); }
-.hm-name { font-size: 9px; color: var(--muted); letter-spacing: 0.05em; }
-.hm-price { font-size: 11px; color: var(--white); margin-bottom: 1px; }
-.hm-pct { font-size: 14px; font-weight: 700; }
-.hm-pct.pos { color: var(--greenbright); }
-.hm-pct.neg { color: var(--red); }
-.hm-pct.neu { color: var(--muted); }
-.hm-bar { height: 2px; margin-top: 5px; border-radius: 1px; transition: width 0.4s; }
-.hm-bar.pos { background: var(--greenbright); }
-.hm-bar.neg { background: var(--red); }
-.hm-bar.neu { background: var(--muted); }
-.hm-cell.strong-pos { background: rgba(0,255,65,0.06); border-color: rgba(0,255,65,0.2); }
-.hm-cell.strong-neg { background: rgba(255,34,34,0.06); border-color: rgba(255,34,34,0.2); }
-.hm-sub { font-size: 8px; color: var(--muted); letter-spacing: 0.08em; margin-top: 1px; text-transform: uppercase; }
+.hm-etf { position: absolute; top: 6px; left: 8px; font-size: 9px; font-weight: 700; letter-spacing: 0.1em; color: rgba(255,255,255,0.45); text-transform: uppercase; }
+.hm-center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 4px 0; }
+.hm-name { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 5px; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.5); }
+.hm-pct { font-size: 18px; font-weight: 700; letter-spacing: 0.02em; line-height: 1; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.4); }
+.hm-price { font-size: 10px; color: rgba(255,255,255,0.7); margin-top: 3px; letter-spacing: 0.04em; }
+.hm-sub { font-size: 8px; color: rgba(255,255,255,0.4); letter-spacing: 0.08em; text-transform: uppercase; text-align: center; margin-top: 2px; }
+.hm-cell.loading { background: #0a0a0a; }
+.hm-cell.loading .hm-pct { color: var(--muted); font-size: 11px; }
 .hm-loading { color: var(--muted); font-size: 10px; letter-spacing: 0.1em; padding: 20px; text-align: center; }
+
+@media(max-width:600px){ .hm { display: none; } }
 
 @media(max-width:600px){ .hm { display: none; } }
 </style>
@@ -196,6 +191,7 @@ td:last-child { border-right: none; }
 <div class="fkeybar">
   <div class="fkey"><span class="fkey-n">F1</span><span class="fkey-l">HELP</span></div>
   <div class="fkey"><span class="fkey-n">F2</span><span class="fkey-l">LOG</span></div>
+  <div class="fkey"><span class="fkey-n">^N</span><span class="fkey-l">NEW TRADE</span></div>
   <div class="fkey"><span class="fkey-n">F3</span><span class="fkey-l">OPEN</span></div>
   <div class="fkey"><span class="fkey-n">F4</span><span class="fkey-l">CLOSED</span></div>
   <div class="fkey"><span class="fkey-n">F5</span><span class="fkey-l">P&amp;L</span></div>
@@ -893,6 +889,30 @@ function fetchSectorQuote(ticker, cb) {
     .catch(function() { cb(null); });
 }
 
+function getHeatColor(pct) {
+  if (pct === null) return { bg: '#0a0a0a', border: '#1a2a1a' };
+  var abs = Math.abs(pct);
+  var intensity, r, g, b, border;
+  if (pct > 0) {
+    if (abs >= 3)      intensity = 0.55;
+    else if (abs >= 2) intensity = 0.40;
+    else if (abs >= 1) intensity = 0.25;
+    else               intensity = 0.12;
+    r = 0; g = Math.round(180 + intensity * 75); b = Math.round(40 + intensity * 20);
+    border = 'rgba(' + r + ',' + g + ',' + b + ',0.5)';
+    return { bg: 'rgba(' + r + ',' + g + ',' + b + ',' + intensity + ')', border: border };
+  } else if (pct < 0) {
+    if (abs >= 3)      intensity = 0.55;
+    else if (abs >= 2) intensity = 0.40;
+    else if (abs >= 1) intensity = 0.25;
+    else               intensity = 0.12;
+    r = Math.round(180 + intensity * 75); g = Math.round(20 + intensity * 10); b = Math.round(20 + intensity * 10);
+    border = 'rgba(' + r + ',' + g + ',' + b + ',0.5)';
+    return { bg: 'rgba(' + r + ',' + g + ',' + b + ',' + intensity + ')', border: border };
+  }
+  return { bg: '#0d0d0d', border: '#2a2a2a' };
+}
+
 function renderHeatmap() {
   var grid = document.getElementById('heatmapGrid');
   if (!grid) return;
@@ -907,34 +927,26 @@ function renderHeatmap() {
       return;
     }
     var d = heatmapData[s.ticker];
-    var pctClass = 'neu';
-    var cellClass = '';
-    var pctStr = 'LOADING...';
+    var pctStr = 'LOADING';
     var priceStr = '--';
     var subStr = '';
-    var barWidth = 0;
-    var barClass = 'neu';
+    var colors = getHeatColor(d ? d.pct : null);
+    var cellStyle = 'background:' + colors.bg + ';border-color:' + colors.border + ';';
 
     if (d) {
-      priceStr = '$' + d.price.toFixed(2);
       pctStr = (d.pct >= 0 ? '+' : '') + d.pct.toFixed(2) + '%';
-      subStr = mktOpen ? 'vs prev close' : 'EOD ' + d.date;
-      if (d.pct > 0)  { pctClass = 'pos'; barClass = 'pos'; }
-      if (d.pct < 0)  { pctClass = 'neg'; barClass = 'neg'; }
-      barWidth = Math.min(Math.abs(d.pct) * 18, 100);
-      if (d.pct >= 2)  cellClass = 'strong-pos';
-      if (d.pct <= -2) cellClass = 'strong-neg';
+      priceStr = '$' + d.price.toFixed(2);
+      subStr = mktOpen ? 'INTRADAY' : 'EOD ' + d.date;
     }
 
-    html += '<div class="hm-cell ' + cellClass + '">' +
-      '<div class="hm-top">' +
-        '<span class="hm-ticker">' + s.ticker + '</span>' +
-        '<span class="hm-name">' + s.name + '</span>' +
+    html += '<div class="hm-cell" style="' + cellStyle + '">' +
+      '<span class="hm-etf">' + s.ticker + '</span>' +
+      '<div class="hm-center">' +
+        '<div class="hm-name">' + s.name + '</div>' +
+        '<div class="hm-pct">' + pctStr + '</div>' +
+        '<div class="hm-price">' + priceStr + '</div>' +
       '</div>' +
-      '<div class="hm-price">' + priceStr + '</div>' +
-      '<div class="hm-pct ' + pctClass + '">' + pctStr + '</div>' +
       '<div class="hm-sub">' + subStr + '</div>' +
-      '<div class="hm-bar ' + barClass + '" style="width:' + barWidth + '%"></div>' +
     '</div>';
   });
 
@@ -966,6 +978,17 @@ function startHeatmapPolling() {
 }
 
 document.getElementById('f_entry_date').value = new Date().toISOString().split('T')[0];
+document.addEventListener('keydown', function(e) {
+  if (e.ctrlKey && e.key === 'n') {
+    e.preventDefault();
+    var tickerInput = document.getElementById('f_ticker');
+    if (tickerInput) {
+      tickerInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(function() { tickerInput.focus(); }, 300);
+    }
+  }
+});
+
 document.getElementById('closeModal').addEventListener('click', function(e) {
   if (e.target === e.currentTarget) closeModal();
 });
