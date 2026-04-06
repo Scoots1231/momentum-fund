@@ -167,6 +167,7 @@ td:last-child { border-right: none; }
 .hm-bar.neu { background: var(--muted); }
 .hm-cell.strong-pos { background: rgba(0,255,65,0.06); border-color: rgba(0,255,65,0.2); }
 .hm-cell.strong-neg { background: rgba(255,34,34,0.06); border-color: rgba(255,34,34,0.2); }
+.hm-sub { font-size: 8px; color: var(--muted); letter-spacing: 0.08em; margin-top: 1px; text-transform: uppercase; }
 .hm-loading { color: var(--muted); font-size: 10px; letter-spacing: 0.1em; padding: 20px; text-align: center; }
 
 @media(max-width:600px){ .hm { display: none; } }
@@ -852,7 +853,7 @@ var SECTORS = [
   { ticker: 'SPY',  name: 'S&P 500' },
   { ticker: 'QQQ',  name: 'Nasdaq 100' },
   { ticker: 'IWM',  name: 'Russell 2000' },
-  { ticker: 'VIX',  name: 'Volatility', special: true },
+  { ticker: 'DIA',  name: 'Dow Jones' },
   { group: 'MOMENTUM SECTORS' },
   { ticker: 'XLK',  name: 'Technology' },
   { ticker: 'XLV',  name: 'Health Care' },
@@ -871,34 +872,20 @@ var SECTORS = [
 ];
 
 var heatmapData = {};
+var heatmapInterval = null;
 
-function getFiveDayAgoTimestamp() {
-  var now = new Date();
-  var daysBack = 0;
-  var d = new Date(now);
-  while (daysBack < 7) {
-    d.setDate(d.getDate() - 1);
-    var day = d.getDay();
-    if (day !== 0 && day !== 6) daysBack++;
-    if (daysBack === 5) break;
-  }
-  d.setHours(0, 0, 0, 0);
-  return Math.floor(d.getTime() / 1000);
-}
-
-function fetchSectorCandle(ticker, cb) {
-  var fromTs = getFiveDayAgoTimestamp();
-  var toTs = Math.floor(Date.now() / 1000) + 86400;
-  var url = 'https://finnhub.io/api/v1/stock/candle?symbol=' + ticker +
-    '&resolution=D&from=' + fromTs + '&to=' + toTs + '&token=' + FINNHUB_KEY;
+function fetchSectorQuote(ticker, cb) {
+  var url = 'https://finnhub.io/api/v1/quote?symbol=' + ticker + '&token=' + FINNHUB_KEY;
   fetch(url)
     .then(function(r) { return r.json(); })
     .then(function(data) {
-      if (data && data.s === 'ok' && data.o && data.o.length > 0 && data.c && data.c.length > 0) {
-        var openPrice = data.o[0];
-        var currentPrice = data.c[data.c.length - 1];
-        var pct = ((currentPrice - openPrice) / openPrice) * 100;
-        cb({ price: currentPrice, pct: parseFloat(pct.toFixed(2)), open5: openPrice });
+      if (data && data.pc && data.pc > 0 && (data.c > 0 || data.pc > 0)) {
+        var price = data.c > 0 ? data.c : data.pc;
+        var prevClose = data.pc;
+        var pct = ((price - prevClose) / prevClose) * 100;
+        var t = data.t ? new Date(data.t * 1000) : null;
+        var dateStr = t ? t.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Chicago' }) : '--';
+        cb({ price: price, pc: prevClose, pct: parseFloat(pct.toFixed(2)), date: dateStr });
       } else {
         cb(null);
       }
@@ -910,9 +897,10 @@ function renderHeatmap() {
   var grid = document.getElementById('heatmapGrid');
   if (!grid) return;
   var tickers = SECTORS.filter(function(s) { return s.ticker; });
-  var loaded = tickers.filter(function(s) { return heatmapData[s.ticker] !== undefined; }).length;
+  var loaded = tickers.filter(function(s) { return heatmapData[s.ticker]; }).length;
+  var mktOpen = isMarketOpen();
   var html = '';
-  var currentGroup = '';
+
   SECTORS.forEach(function(s) {
     if (s.group) {
       html += '<div class="hm-group-label">' + s.group + '</div>';
@@ -921,19 +909,23 @@ function renderHeatmap() {
     var d = heatmapData[s.ticker];
     var pctClass = 'neu';
     var cellClass = '';
-    var pctStr = '...';
-    var priceStr = '...';
+    var pctStr = 'LOADING...';
+    var priceStr = '--';
+    var subStr = '';
     var barWidth = 0;
     var barClass = 'neu';
+
     if (d) {
-      pctStr = (d.pct >= 0 ? '+' : '') + d.pct.toFixed(2) + '%';
       priceStr = '$' + d.price.toFixed(2);
-      if (d.pct > 0) { pctClass = 'pos'; barClass = 'pos'; }
-      else if (d.pct < 0) { pctClass = 'neg'; barClass = 'neg'; }
-      barWidth = Math.min(Math.abs(d.pct) * 15, 100);
-      if (d.pct >= 2) cellClass = 'strong-pos';
-      else if (d.pct <= -2) cellClass = 'strong-neg';
+      pctStr = (d.pct >= 0 ? '+' : '') + d.pct.toFixed(2) + '%';
+      subStr = mktOpen ? 'vs prev close' : 'EOD ' + d.date;
+      if (d.pct > 0)  { pctClass = 'pos'; barClass = 'pos'; }
+      if (d.pct < 0)  { pctClass = 'neg'; barClass = 'neg'; }
+      barWidth = Math.min(Math.abs(d.pct) * 18, 100);
+      if (d.pct >= 2)  cellClass = 'strong-pos';
+      if (d.pct <= -2) cellClass = 'strong-neg';
     }
+
     html += '<div class="hm-cell ' + cellClass + '">' +
       '<div class="hm-top">' +
         '<span class="hm-ticker">' + s.ticker + '</span>' +
@@ -941,24 +933,36 @@ function renderHeatmap() {
       '</div>' +
       '<div class="hm-price">' + priceStr + '</div>' +
       '<div class="hm-pct ' + pctClass + '">' + pctStr + '</div>' +
+      '<div class="hm-sub">' + subStr + '</div>' +
       '<div class="hm-bar ' + barClass + '" style="width:' + barWidth + '%"></div>' +
-      '</div>';
+    '</div>';
   });
+
   grid.innerHTML = html;
+
   var now = new Date();
   var ts = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', timeZone: 'America/Chicago' });
-  var marketStr = isMarketOpen() ? 'LIVE' : 'LAST CLOSE';
-  document.getElementById('hmMeta').textContent = '5-DAY % CHANGE  |  ' + marketStr + '  |  ' + loaded + '/' + tickers.length + ' LOADED  |  ' + ts + ' CT';
+  var modeStr = mktOpen ? 'LIVE  |  REFRESHES 30s' : 'END OF DAY DATA';
+  document.getElementById('hmMeta').textContent =
+    'DAY % CHANGE  |  ' + modeStr + '  |  ' + loaded + '/' + tickers.length + ' LOADED  |  UPDATED ' + ts + ' CT';
 }
 
 function loadHeatmap() {
   var tickers = SECTORS.filter(function(s) { return s.ticker; });
   tickers.forEach(function(s) {
-    fetchSectorCandle(s.ticker, function(data) {
+    fetchSectorQuote(s.ticker, function(data) {
       heatmapData[s.ticker] = data;
       renderHeatmap();
     });
   });
+}
+
+function startHeatmapPolling() {
+  loadHeatmap();
+  if (heatmapInterval) clearInterval(heatmapInterval);
+  heatmapInterval = setInterval(function() {
+    loadHeatmap();
+  }, isMarketOpen() ? 30000 : 300000);
 }
 
 document.getElementById('f_entry_date').value = new Date().toISOString().split('T')[0];
@@ -967,8 +971,7 @@ document.getElementById('closeModal').addEventListener('click', function(e) {
 });
 
 loadTrades();
-loadHeatmap();
-setInterval(loadHeatmap, 300000);
+startHeatmapPolling();
 </script>
 </body>
 </html>
