@@ -888,7 +888,7 @@ function getFiveDayAgoTimestamp() {
 
 function fetchSectorCandle(ticker, cb) {
   var fromTs = getFiveDayAgoTimestamp();
-  var toTs = Math.floor(Date.now() / 1000);
+  var toTs = Math.floor(Date.now() / 1000) + 86400;
   var url = 'https://finnhub.io/api/v1/stock/candle?symbol=' + ticker +
     '&resolution=D&from=' + fromTs + '&to=' + toTs + '&token=' + FINNHUB_KEY;
   fetch(url)
@@ -947,7 +947,8 @@ function renderHeatmap() {
   grid.innerHTML = html;
   var now = new Date();
   var ts = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', timeZone: 'America/Chicago' });
-  document.getElementById('hmMeta').textContent = '5-DAY % CHANGE  |  ' + loaded + '/' + tickers.length + ' LOADED  |  ' + ts + ' CT';
+  var marketStr = isMarketOpen() ? 'LIVE' : 'LAST CLOSE';
+  document.getElementById('hmMeta').textContent = '5-DAY % CHANGE  |  ' + marketStr + '  |  ' + loaded + '/' + tickers.length + ' LOADED  |  ' + ts + ' CT';
 }
 
 function loadHeatmap() {
