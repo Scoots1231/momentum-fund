@@ -60,7 +60,7 @@ body { background: var(--bg); color: var(--white); font-family: var(--sans); fon
 .sbv.b { color: var(--blue); }
 .sbv.y { color: var(--yellow); }
 
-.intel-panel { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--border); }
+.intel-panel { display: grid; grid-template-columns: 1.6fr 0.8fr 1fr; border-bottom: 1px solid var(--border); }
 .intel-section { border-right: 1px solid var(--border); }
 .intel-section:last-child { border-right: none; }
 .intel-header { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; background: var(--surface); }
@@ -69,6 +69,24 @@ body { background: var(--bg); color: var(--white); font-family: var(--sans); fon
 .badge-live { color: var(--green); background: var(--green-dim); }
 .badge-eod { color: var(--yellow); background: var(--yellow-dim); }
 .badge-news { color: var(--blue); background: var(--blue-dim); }
+
+.wl-body { padding: 10px; background: var(--bg); display: flex; flex-direction: column; gap: 6px; min-height: 200px; }
+.wl-cell { border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; position: relative; border: 1px solid transparent; cursor: default; }
+.wl-cell:hover .wl-del { opacity: 1; }
+.wl-left { display: flex; flex-direction: column; gap: 2px; }
+.wl-ticker { font-size: 14px; font-weight: 700; color: #fff; font-family: var(--mono); letter-spacing: 0.04em; }
+.wl-price { font-size: 11px; color: rgba(255,255,255,0.65); font-family: var(--mono); margin-top: 1px; }
+.wl-pct { font-size: 20px; font-weight: 700; color: #fff; letter-spacing: -0.02em; }
+.wl-del { background: rgba(0,0,0,0.3); border: none; color: rgba(255,255,255,0.6); width: 20px; height: 20px; border-radius: 50%; font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.15s; position: absolute; top: 6px; right: 6px; line-height: 1; padding: 0; }
+.wl-del:hover { background: rgba(239,68,68,0.5); color: #fff; opacity: 1; }
+.wl-add { padding: 8px 10px; border-top: 1px solid var(--border); background: var(--surface); display: flex; gap: 6px; align-items: center; }
+.wl-add input { flex: 1; background: var(--bg); border: 1px solid var(--border2); color: var(--white); font-family: var(--mono); font-size: 12px; padding: 5px 8px; border-radius: 6px; outline: none; text-transform: uppercase; }
+.wl-add input:focus { border-color: var(--blue); }
+.wl-add input::placeholder { color: var(--muted2); text-transform: none; font-family: var(--sans); }
+.wl-add-btn { background: var(--blue); color: #fff; border: none; font-family: var(--sans); font-size: 11px; font-weight: 600; padding: 5px 12px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+.wl-add-btn:hover { background: #2563eb; }
+.wl-add-btn:disabled { background: var(--surface2); color: var(--muted); cursor: not-allowed; }
+.wl-loading { padding: 20px; text-align: center; color: var(--muted); font-size: 12px; }
 
 .hm-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; padding: 10px; background: var(--bg); }
 .hm-group { grid-column: 1 / -1; font-size: 9px; color: var(--muted2); letter-spacing: 0.12em; text-transform: uppercase; padding: 4px 2px 2px; border-bottom: 1px solid var(--border); margin-bottom: 2px; font-weight: 600; }
@@ -172,7 +190,7 @@ td:last-child { border-right: none; }
 .hk-label { color: var(--muted2); font-size: 10px; }
 .sb-right { font-size: 10px; color: var(--muted2); font-family: var(--mono); }
 
-@media(max-width:700px){ .intel-panel { grid-template-columns: 1fr; } .hm-grid { grid-template-columns: repeat(2,1fr); } }
+@media(max-width:900px){ .intel-panel { grid-template-columns: 1fr; } .hm-grid { grid-template-columns: repeat(2,1fr); } }
 </style>
 </head>
 <body>
@@ -215,6 +233,19 @@ td:last-child { border-right: none; }
     </div>
     <div class="hm-grid" id="heatmapGrid">
       <div style="grid-column:1/-1;text-align:center;padding:30px;color:var(--muted);font-size:12px;">Fetching sector data...</div>
+    </div>
+  </div>
+  <div class="intel-section">
+    <div class="intel-header">
+      <span class="intel-title">Watchlist</span>
+      <span class="intel-badge badge-live" id="wlBadge">0 / 5</span>
+    </div>
+    <div class="wl-body" id="wlBody">
+      <div class="wl-loading">Add up to 5 tickers below</div>
+    </div>
+    <div class="wl-add">
+      <input type="text" id="wlInput" placeholder="Add ticker..." maxlength="8">
+      <button class="wl-add-btn" id="wlAddBtn" onclick="addWatchlistTicker()">Add</button>
     </div>
   </div>
   <div class="intel-section">
@@ -807,6 +838,99 @@ function loadNews() {
     });
 }
 
+var WL_KEY = 'momentum_fund_watchlist_v1';
+var watchlist = [];
+var watchlistPrices = {};
+var wlInterval = null;
+
+function loadWatchlist() {
+  try {
+    var saved = localStorage.getItem(WL_KEY);
+    if (saved) watchlist = JSON.parse(saved);
+  } catch(e) { watchlist = []; }
+  renderWatchlist();
+  refreshWatchlistPrices();
+}
+
+function saveWatchlist() {
+  localStorage.setItem(WL_KEY, JSON.stringify(watchlist));
+}
+
+function addWatchlistTicker() {
+  var input = document.getElementById('wlInput');
+  var ticker = input.value.trim().toUpperCase().replace(/[^A-Z]/g, '');
+  if (!ticker) return;
+  if (watchlist.length >= 5) { showToast('Watchlist is full — delete one to add another'); return; }
+  if (watchlist.indexOf(ticker) !== -1) { showToast(ticker + ' already on watchlist'); input.value = ''; return; }
+  watchlist.push(ticker);
+  saveWatchlist();
+  input.value = '';
+  renderWatchlist();
+  fetchWatchlistQuote(ticker, function(data) {
+    watchlistPrices[ticker] = data;
+    renderWatchlist();
+  });
+}
+
+function removeWatchlistTicker(ticker) {
+  watchlist = watchlist.filter(function(t) { return t !== ticker; });
+  delete watchlistPrices[ticker];
+  saveWatchlist();
+  renderWatchlist();
+}
+
+function fetchWatchlistQuote(ticker, cb) {
+  fetch('https://finnhub.io/api/v1/quote?symbol=' + ticker + '&token=' + FINNHUB_KEY)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data && data.pc && data.pc > 0) {
+        var price = data.c > 0 ? data.c : data.pc;
+        var pct = ((price - data.pc) / data.pc) * 100;
+        cb({ price: price, pct: parseFloat(pct.toFixed(2)) });
+      } else cb(null);
+    })
+    .catch(function() { cb(null); });
+}
+
+function refreshWatchlistPrices() {
+  if (watchlist.length === 0) return;
+  watchlist.forEach(function(ticker) {
+    fetchWatchlistQuote(ticker, function(data) {
+      watchlistPrices[ticker] = data;
+      renderWatchlist();
+    });
+  });
+}
+
+function renderWatchlist() {
+  var body = document.getElementById('wlBody');
+  var badge = document.getElementById('wlBadge');
+  var addBtn = document.getElementById('wlAddBtn');
+  if (!body) return;
+  if (badge) badge.textContent = watchlist.length + ' / 5';
+  if (addBtn) addBtn.disabled = watchlist.length >= 5;
+
+  if (watchlist.length === 0) {
+    body.innerHTML = '<div class="wl-loading">Add up to 5 tickers to watch</div>';
+    return;
+  }
+
+  body.innerHTML = watchlist.map(function(ticker) {
+    var d = watchlistPrices[ticker];
+    var pctStr = d ? (d.pct >= 0 ? '+' : '') + d.pct.toFixed(2) + '%' : '...';
+    var priceStr = d ? '$' + d.price.toFixed(2) : '--';
+    var colors = getHeatColor(d ? d.pct : null);
+    return '<div class="wl-cell" style="background:' + colors.bg + ';border-color:' + colors.border + ';">' +
+      '<div class="wl-left">' +
+        '<div class="wl-ticker">' + ticker + '</div>' +
+        '<div class="wl-price">' + priceStr + '</div>' +
+      '</div>' +
+      '<div class="wl-pct">' + pctStr + '</div>' +
+      '<button class="wl-del" onclick="removeWatchlistTicker(\'' + ticker + '\')" title="Remove">&#215;</button>' +
+    '</div>';
+  }).join('');
+}
+
 document.addEventListener('keydown', function(e) {
   if (e.key === 'F2') {
     e.preventDefault();
@@ -819,8 +943,17 @@ document.addEventListener('keydown', function(e) {
 document.getElementById('f_entry_date').value = new Date().toISOString().split('T')[0];
 document.getElementById('closeModal').addEventListener('click', function(e) { if (e.target === e.currentTarget) closeModal(); });
 
+var wlInputEl = document.getElementById('wlInput');
+if (wlInputEl) {
+  wlInputEl.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') addWatchlistTicker();
+  });
+}
+
 loadTrades();
 startHeatmapPolling();
+loadWatchlist();
+wlInterval = setInterval(refreshWatchlistPrices, isMarketOpen() ? 30000 : 300000);
 loadNews();
 setInterval(loadNews, 600000);
 </script>
